@@ -1,0 +1,6 @@
+
+---
+deployment:
+  tasks:
+    - /bin/mkdir -p /home/puspasarirate/public_html
+    - /bin/cp -a /home/puspasarirate/repositories/MoneyChanger-Display/deploy/frontend/. /home/puspasarirate/public_html/
