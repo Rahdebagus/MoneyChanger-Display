@@ -1,0 +1,39 @@
+# PAM Rate Board - backend dependencies
+# Verified on Python 3.10.11 (Windows) with MariaDB 10.4.32 from XAMPP.
+#
+# OCR pinning, do not "upgrade" casually:
+#   paddlepaddle 3.3.1 with paddleocr 2.7.3 fails at inference with
+#   "OneDnnContext does not have the input Filter ... [operator < fused_conv2d >]".
+#   Disabling oneDNN via FLAGS_use_mkldnn=0 / FLAGS_enable_pir_api=0 does not help.
+#   paddlepaddle 2.6.2 is the combination verified working by smoke test.
+
+# --- Web framework ---
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+python-multipart==0.0.9
+pydantic-settings==2.6.1
+
+# --- Database ---
+SQLAlchemy==2.0.36
+alembic==1.14.0
+PyMySQL==1.1.1
+cryptography==43.0.3          # required by PyMySQL for caching_sha2_password
+
+# --- Security ---
+bcrypt==4.2.1
+PyJWT==2.10.1
+
+# --- OCR / imaging ---
+paddleocr==2.7.3
+paddlepaddle==2.6.2
+opencv-python<=4.6.0.66
+numpy==1.26.4
+Pillow==10.3.0
+
+# --- Video ---
+imageio-ffmpeg>=0.5.1
+
+# --- Tests ---
+pytest==8.3.4
+pytest-asyncio==0.25.0
+httpx==0.28.1

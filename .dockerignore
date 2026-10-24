@@ -1,0 +1,31 @@
+# Keep host-built environments and secrets out of the build context.
+.git
+.gitignore
+.venv
+venv
+env
+backend/venv
+backend/venv_old
+**/__pycache__
+**/*.py[cod]
+.pytest_cache
+
+node_modules
+frontend/node_modules
+frontend/dist
+
+# Runtime data lives on a volume, not in the image.
+storage
+
+.env
+.env.*
+!.env.example
+
+*.stackdump
+.DS_Store
+Thumbs.db
+docs
+*.md
+!backend/README.md
+
+.git-backups

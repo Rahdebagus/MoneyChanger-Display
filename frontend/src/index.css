@@ -1,0 +1,319 @@
+:root {
+  --text: #6b6375;
+  --text-h: #08060d;
+  --bg: #fff;
+  --border: #e5e4e7;
+  --code-bg: #f4f3ec;
+  --accent: #aa3bff;
+  --accent-bg: rgba(170, 59, 255, 0.1);
+  --accent-border: rgba(170, 59, 255, 0.5);
+  --social-bg: rgba(244, 243, 236, 0.5);
+  --shadow:
+    rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
+
+  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
+  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
+  --mono: ui-monospace, Consolas, monospace;
+
+  font: 16px/145% var(--sans);
+  letter-spacing: 0.18px;
+  color-scheme: light dark;
+  color: var(--text);
+  background: var(--bg);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  @media (min-width: 640px) {
+    font-size: 18px;
+  }
+
+  @media (max-width: 1024px) {
+    font-size: 16px;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --text: #9ca3af;
+    --text-h: #f3f4f6;
+    --bg: #16171d;
+    --border: #2e303a;
+    --code-bg: #1f2028;
+    --accent: #c084fc;
+    --accent-bg: rgba(192, 132, 252, 0.15);
+    --accent-border: rgba(192, 132, 252, 0.5);
+    --social-bg: rgba(47, 48, 58, 0.5);
+    --shadow:
+      rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
+  }
+
+  #social .button-icon {
+    filter: invert(1) brightness(2);
+  }
+}
+
+body {
+  margin: 0;
+}
+
+#root {
+  width: 1126px;
+  max-width: 100%;
+  margin: 0 auto;
+  text-align: center;
+  border-inline: 1px solid var(--border);
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  padding: 0;
+}
+
+@media (max-width: 639px) {
+  #root {
+    border-inline: none;
+  }
+}
+
+h1,
+h2 {
+  font-family: var(--heading);
+  font-weight: 500;
+  color: var(--text-h);
+}
+
+h1 {
+  font-size: 56px;
+  letter-spacing: -1.68px;
+  margin: 32px 0;
+  @media (max-width: 1024px) {
+    font-size: 36px;
+    margin: 20px 0;
+  }
+}
+h2 {
+  font-size: 24px;
+  line-height: 118%;
+  letter-spacing: -0.24px;
+  margin: 0 0 8px;
+  @media (max-width: 1024px) {
+    font-size: 20px;
+  }
+}
+p {
+  margin: 0;
+}
+
+code,
+.counter {
+  font-family: var(--mono);
+  display: inline-flex;
+  border-radius: 4px;
+  color: var(--text-h);
+}
+
+code {
+  font-size: 15px;
+  line-height: 135%;
+  padding: 4px 8px;
+  background: var(--code-bg);
+}
+
+/* Responsive utility classes for buttons */
+.button-group {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 16px;
+  flex-direction: row-reverse;
+}
+
+.button-group button {
+  flex: 1;
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-size: 13px;
+  transition: all 0.2s;
+}
+
+.responsive-button {
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 14px;
+  width: 100%;
+}
+
+@media (min-width: 640px) {
+  .button-group {
+    gap: 12px;
+    margin-top: 20px;
+    flex-direction: row;
+  }
+
+  .button-group button {
+    flex: auto;
+    border-radius: 10px;
+    padding: 12px 28px;
+    font-size: 15px;
+  }
+
+  .responsive-button {
+    border-radius: 12px;
+    padding: 14px;
+    font-size: 16px;
+  }
+}
+
+/* ── Scanning animation ───────────────────────────────────────────────────── */
+@keyframes scanLineMove {
+  0%   { top: 0%; opacity: 1; }
+  90%  { top: 100%; opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}
+
+@keyframes scanPulse {
+  0%, 100% { opacity: 0.6; }
+  50%       { opacity: 1; }
+}
+
+@keyframes scanDots {
+  0%   { content: '.'; }
+  33%  { content: '..'; }
+  66%  { content: '...'; }
+  100% { content: '.'; }
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(20px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes boardReveal {
+  0%   { opacity: 0; transform: scale(0.97) translateY(12px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.scan-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 40, 100, 0.82);
+  border-radius: inherit;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+  overflow: hidden;
+  backdrop-filter: blur(2px);
+}
+
+.scan-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 4px;
+  background: linear-gradient(to right, transparent 0%, #00E5FF 40%, #ffffff 50%, #00E5FF 60%, transparent 100%);
+  box-shadow: 0 0 18px 4px rgba(0, 229, 255, 0.7);
+  animation: scanLineMove 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.scan-grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(0, 200, 255, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 200, 255, 0.07) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.scan-text {
+  color: #00E5FF;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  animation: scanPulse 1.2s ease-in-out infinite;
+  margin-top: 16px;
+  font-family: 'Segoe UI', monospace;
+}
+
+.scan-icon {
+  font-size: 40px;
+  animation: scanPulse 1.2s ease-in-out infinite;
+}
+
+.scan-bar-wrap {
+  width: 200px;
+  height: 4px;
+  background: rgba(255,255,255,0.15);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-top: 12px;
+}
+
+.scan-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #00B8D9, #00E5FF, #80FFFF);
+  background-size: 200% 100%;
+  animation: shimmer 1.2s linear infinite;
+  border-radius: 4px;
+  width: 60%;
+}
+
+@keyframes shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.4s ease both;
+}
+
+.animate-board-reveal {
+  animation: boardReveal 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.customization-panel {
+  background: linear-gradient(135deg, #F0F8FF, #E8F4FD);
+  border: 1.5px solid #BBDEFB;
+  border-radius: 14px;
+  padding: 18px 20px;
+  margin-bottom: 20px;
+}
+
+.logo-preview {
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+  border-radius: 10px;
+  border: 2px solid #BBDEFB;
+  background: #fff;
+  padding: 4px;
+}
+
+/* ── Shared spinner used by the Spinner component ──────────────────────────── */
+.pam-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2.5px solid #BBDEFB;
+  border-top-color: #1565C0;
+  border-radius: 50%;
+  display: inline-block;
+  animation: pam-spin 0.8s linear infinite;
+}
+
+@keyframes pam-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pam-spinner { animation-duration: 2.4s; }
+}

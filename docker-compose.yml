@@ -1,0 +1,96 @@
+# PAM Rate Board — API, worker, database and static frontend.
+#
+#   docker compose up -d --build
+#   docker compose exec api alembic upgrade head
+#   docker compose exec api python -m app.cli create-admin
+#
+# No queue service: jobs and schedules are claimed straight out of MySQL with
+# guarded UPDATEs, which is sufficient at this volume and one less moving part
+# to run. See docs/architecture.md if that ever needs to change.
+
+services:
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: pam_rate_board
+      MYSQL_USER: pam_user
+      MYSQL_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?set DB_ROOT_PASSWORD in .env}
+      # The application writes UTC and expects NOW() to agree.
+      TZ: UTC
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+00:00
+      # Strict mode so an oversized DECIMAL errors instead of being truncated.
+      - --sql-mode=STRICT_TRANS_TABLES,NO_ENGINE_SUBSTITUTION
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    # Not published: the database stays on the private compose network.
+    expose:
+      - "3306"
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: mysql+pymysql://pam_user:${DB_PASSWORD}@db:3306/pam_rate_board?charset=utf8mb4
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8000}
+      STORAGE_DIR: /data/storage
+    volumes:
+      - media_data:/data/storage
+      - paddle_models:/root/.paddleocr
+    ports:
+      - "8000:8000"
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: mysql+pymysql://pam_user:${DB_PASSWORD}@db:3306/pam_rate_board?charset=utf8mb4
+      SECRET_KEY: ${SECRET_KEY}
+      STORAGE_DIR: /data/storage
+    volumes:
+      # Same volume as the API: the worker writes the media the API serves.
+      - media_data:/data/storage
+      - paddle_models:/root/.paddleocr
+    # Runs both the job queue and the publication scheduler. Safe to scale:
+    # claims are atomic, so no job or schedule ever runs twice.
+    command: ["python", "-m", "app.workers.runner"]
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8000}
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "8080:80"
+
+volumes:
+  db_data:
+  media_data:
+  paddle_models:

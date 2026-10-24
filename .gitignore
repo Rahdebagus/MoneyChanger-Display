@@ -1,0 +1,62 @@
+# ─── Secrets ──────────────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ─── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Virtual environments. One active environment (.venv) is expected; it is
+# reproducible from backend/requirements.txt and must never be committed.
+.venv/
+venv/
+env/
+backend/venv/
+backend/venv_old/
+
+# ─── Node ─────────────────────────────────────────────────────────────────────
+node_modules/
+dist/
+.vite/
+npm-debug.log*
+# Lockfiles ARE tracked on purpose: a clean install must be reproducible.
+!package-lock.json
+
+# ─── Runtime data ─────────────────────────────────────────────────────────────
+# Generated media, uploads and job scratch space. Durable volume in production,
+# never source control.
+storage/
+
+# ─── OCR models ───────────────────────────────────────────────────────────────
+# PaddleOCR downloads these on first run (~16MB) into the user profile.
+.paddleocr/
+inference/
+
+# ─── Editor / OS ──────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+*.stackdump
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/launch.json
+
+# Local archives, database exports and logs
+*.zip
+*.7z
+*.rar
+*.sql
+*.db
+*.sqlite*
+*.log
+
+# Preserved metadata from the former frontend repository
+.git-backups/
