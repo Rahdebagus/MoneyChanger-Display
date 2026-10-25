@@ -14,18 +14,17 @@ Crash recovery runs on startup and on a timer, so a job whose worker died is
 requeued instead of leaving a version stuck in 'generating' forever.
 """
 
+import argparse
 import logging
 import signal
 import sys
 import time
-from typing import Optional
 
 from app.core.config import get_settings
 from app.core.logging import configure_logging, new_request_id, set_request_id
 from app.db.session import SessionLocal, session_scope
-from app.models import Job, JobStatus, JobType, RateVersion, VersionStatus
-from app.services import audit, board_builder, events, jobs, pairing, publishing, storage
-from app.services import rates as rates_service
+from app.models import JobType
+from app.services import audit, events, jobs, pairing, publishing, storage
 from app.services import version_cleanup
 
 logger = logging.getLogger(__name__)
@@ -44,87 +43,13 @@ class Worker:
         logger.info("Stop requested; finishing current job then exiting")
         self._running = False
 
-    # ------------------------------------------------------------------
-    # Job handlers
-    # ------------------------------------------------------------------
-    def _handle_generate_board(self, db, job: Job) -> dict:
-        version_id = int(job.payload.get("version_id", 0))
-        version = db.get(RateVersion, version_id)
-        if version is None:
-            raise ValueError(f"Versi {version_id} tidak ditemukan.")
-
-        jobs.heartbeat(db, job, progress=10)
-        board_builder.build_board(db, version)
-
-        jobs.heartbeat(db, job, progress=70)
-        rates_service.mark_ready(db, version)
-        db.commit()
-
-        result = {
-            "version_id": version.id,
-            "png_asset_id": version.png_asset_id,
-            "thumbnail_asset_id": version.thumbnail_asset_id,
-        }
-
-        if job.payload.get("generate_video"):
-            # Queued separately so a slow encode never blocks the board from
-            # becoming publishable.
-            follow_up = jobs.enqueue(
-                db,
-                job_type=JobType.GENERATE_VIDEO.value,
-                payload={"version_id": version.id},
-                version_id=version.id,
-                created_by=job.created_by,
-            )
-            db.commit()
-            result["video_job_id"] = follow_up.id
-
-        return result
-
-    def _handle_generate_video(self, db, job: Job) -> dict:
-        version_id = int(job.payload.get("version_id", 0))
-        version = db.get(RateVersion, version_id)
-        if version is None:
-            raise ValueError(f"Versi {version_id} tidak ditemukan.")
-
-        jobs.heartbeat(db, job, progress=20)
-        board_builder.build_video(db, version)
-        db.commit()
-
-        return {"version_id": version.id, "mp4_asset_id": version.mp4_asset_id}
-
-    def _on_job_failure(self, db, job: Job, message: str) -> None:
-        """Keep the version honest when generation fails.
-
-        A version only goes to 'failed' once the job is out of retries, so a
-        transient error does not permanently mark a board unusable. A failed
-        version is never publishable.
-        """
-        if job.version_id is None:
-            return
-        version = db.get(RateVersion, job.version_id)
-        if version is None:
-            return
-
-        if job.attempts >= job.max_attempts:
-            if job.job_type == JobType.GENERATE_BOARD.value:
-                board_builder.discard_media(db, version)
-                version.error_message = message[:2000]
-            else:
-                # A failed video leaves a perfectly good board in place.
-                version.error_message = message[:2000]
-            db.commit()
-
-    # ------------------------------------------------------------------
-    # Main loop
-    # ------------------------------------------------------------------
     def run_once(self) -> bool:
         """Process at most one job. Returns True when work was done."""
         db = SessionLocal()
         try:
             job = jobs.claim_next(
                 db,
-                job_types=[JobType.GENERATE_BOARD.value, JobType.GENERATE_VIDEO.value, JobType.CLEANUP_MEDIA.value],
+                job_types=[JobType.CLEANUP_MEDIA.value],
             )
         except Exception:
             logger.exception("Failed to claim a job")
@@ -140,11 +65,7 @@ class Worker:
         started = time.monotonic()
 
         try:
-            if job.job_type == JobType.GENERATE_BOARD.value:
-                result = self._handle_generate_board(db, job)
-            elif job.job_type == JobType.GENERATE_VIDEO.value:
-                result = self._handle_generate_video(db, job)
-            elif job.job_type == JobType.CLEANUP_MEDIA.value:
+            if job.job_type == JobType.CLEANUP_MEDIA.value:
                 result = version_cleanup.cleanup_media(db, job.payload)
             else:
                 raise ValueError(f"Tipe job tidak dikenal: {job.job_type}")
@@ -162,7 +83,6 @@ class Worker:
             try:
                 jobs.fail(db, job, message)
                 db.commit()
-                self._on_job_failure(db, job, message)
             except Exception:
                 logger.exception("Could not record failure for job %s", job.id)
                 db.rollback()
@@ -278,7 +198,19 @@ def main() -> int:
     worker = Worker()
     signal.signal(signal.SIGINT, worker.stop)
     signal.signal(signal.SIGTERM, worker.stop)
-    worker.serve_forever()
+    parser = argparse.ArgumentParser(description="Cleanup/scheduler only; PNG saves run in the API.")
+    parser.add_argument("--once", action="store_true")
+    parser.add_argument("--max-jobs", type=int, default=10)
+    args = parser.parse_args()
+    if args.once:
+        configure_logging("INFO")
+        for _ in range(max(0, min(args.max_jobs, 100))):
+            if not worker.run_once():
+                break
+        worker.run_scheduler()
+        worker.run_maintenance()
+    else:
+        worker.serve_forever()
     return 0
 
 

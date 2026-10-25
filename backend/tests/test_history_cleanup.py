@@ -60,7 +60,7 @@ def test_deletion_queues_cleanup_and_worker_reclaims_files(client, auth, ready, 
 def test_in_use_version_cannot_be_deleted(consumer, client, auth, ready, db):
     version = ready()
     if consumer in {"queued", "running"}:
-        job = jobs.enqueue(db, job_type="generate_video", payload={}, version_id=version.id)
+        job = jobs.enqueue(db, job_type="cleanup_media", payload={}, version_id=version.id)
         job.status = consumer
     elif consumer == "reported":
         db.add(Display(name="Offline TV", reported_version_id=version.id))
@@ -226,7 +226,7 @@ def test_dashboard_counts_respect_staff_branches(client, auth, staff_auth, branc
             db, version=version, displays=[display], created_by=None,
             scheduled_at=utcnow() + timedelta(hours=1),
         )
-        job = jobs.enqueue(db, job_type="generate_video", payload={}, version_id=version.id)
+        job = jobs.enqueue(db, job_type="cleanup_media", payload={}, version_id=version.id)
         job.status = job_status
         db.commit()
     admin = client.get("/api/dashboard", headers=auth).json()

@@ -123,9 +123,9 @@ def serialize_version(
         source_version_id=version.source_version_id,
         thumbnail_url=media_url(version.thumbnail_asset_id),
         png_url=media_url(version.png_asset_id),
-        mp4_url=media_url(version.mp4_asset_id),
+        mp4_url=None,  # Deprecated compatibility field; only PNG is served.
         is_live=version.id in live_ids,
-        delete_blocked_reason=blocked_reasons.get(version.id),
+        delete_blocked_reason=("Versi masih diproses." if version.status == "generating" else blocked_reasons.get(version.id)),
         error_message=version.error_message,
     )
 

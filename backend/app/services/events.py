@@ -28,7 +28,9 @@ def emit(
     *,
     display_id: Optional[int] = None,
     payload: Optional[dict] = None,
-) -> EventOutbox:
+) -> Optional[EventOutbox]:
+    if not get_settings().realtime_enabled:
+        return None
     event = EventOutbox(
         topic=topic,
         display_id=display_id,

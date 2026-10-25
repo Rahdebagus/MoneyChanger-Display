@@ -1,0 +1,3 @@
+# Optional adapter for an existing Passenger WSGI installation.
+# Install only after comparing with the version already used by the host.
+a2wsgi==1.10.10

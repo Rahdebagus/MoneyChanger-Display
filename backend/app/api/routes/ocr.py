@@ -38,11 +38,15 @@ def _validate(file: UploadFile) -> None:
 
 
 def _read(file: UploadFile) -> bytes:
-    data = file.file.read()
+    data = file.file.read(MAX_UPLOAD_BYTES + 1)
     if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=400, detail="Ukuran gambar maksimal 10MB.")
     if not data:
         raise HTTPException(status_code=400, detail="File gambar kosong.")
+    try:
+        ocr_runner.validate_image(data)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return data
 
 
@@ -74,6 +78,8 @@ def upload_single(
 
     try:
         raw = ocr_runner.extract_from_image(data)
+    except ocr_runner.OCRBusy as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception:
         logger.exception("Single-image OCR failed")
         raise HTTPException(
@@ -107,6 +113,8 @@ def upload_blocks(
 
     try:
         raw = ocr_runner.extract_from_blocks(left_bytes, middle_bytes, right_bytes)
+    except ocr_runner.OCRBusy as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception:
         logger.exception("Block OCR failed")
         raise HTTPException(

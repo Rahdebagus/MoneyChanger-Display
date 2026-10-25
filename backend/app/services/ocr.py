@@ -3,21 +3,30 @@ ocr.py - OCR Logic using PaddleOCR.
 Supports full image OCR and more accurate 3-block OCR.
 """
 
+import logging
+import os
+
+from app.core.config import get_settings
+
+# Set before importing Paddle/BLAS, only on the first OCR request.
+for _variable in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
+    os.environ[_variable] = str(get_settings().ocr_cpu_threads)
+
 import cv2
 import numpy as np
 from paddleocr import PaddleOCR
 from app.services.parser import parse_ocr_blocks, parse_ocr_results
 
+cv2.setNumThreads(get_settings().ocr_cpu_threads)
+logger = logging.getLogger(__name__)
 _ocr_engine = None
 
 
 def get_ocr_engine() -> PaddleOCR:
     global _ocr_engine
     if _ocr_engine is None:
-        try:
-            _ocr_engine = PaddleOCR(use_angle_cls=True, lang="en", use_gpu=False, show_log=False)
-        except TypeError:
-            _ocr_engine = PaddleOCR(use_angle_cls=True, lang="en")
+        _ocr_engine = PaddleOCR(use_angle_cls=True, lang="en", use_gpu=False, show_log=False,
+                               cpu_threads=get_settings().ocr_cpu_threads, enable_mkldnn=False)
     return _ocr_engine
 
 
@@ -29,7 +38,7 @@ def preprocess_image(image_bytes: bytes) -> np.ndarray:
 
     h, w = img.shape[:2]
     if w < 1000:
-        scale = 1000 / w
+        scale = min(1000 / w, (8_000_000 / (h * w)) ** 0.5)
         img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_CUBIC)
 
     kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
@@ -59,7 +68,7 @@ def extract_rates_from_image(image_bytes: bytes) -> dict:
     """Fallback single image OCR."""
     img = preprocess_image(image_bytes)
     raw_texts = _run_ocr(img)
-    print("RAW OCR:", raw_texts)
+    logger.debug("OCR detected %s text rows", len(raw_texts))
     return parse_ocr_results(raw_texts)
 
 def ocr_image_bytes(image_bytes: bytes):
@@ -80,15 +89,8 @@ def ocr_image_bytes(image_bytes: bytes):
 
 def extract_rates_from_blocks(left_bytes: bytes, middle_bytes: bytes, right_bytes: bytes) -> dict:
     """Recommended: OCR 3 cropped blocks: left, middle, right."""
-    blocks = {
-        "LEFT": preprocess_image(left_bytes),
-        "MIDDLE": preprocess_image(middle_bytes),
-        "RIGHT": preprocess_image(right_bytes),
-    }
-
     raw_blocks: dict[str, list[str]] = {}
-    for name, block_img in blocks.items():
-        raw_blocks[name] = _run_ocr(block_img)
-
-    print("RAW BLOCKS:", raw_blocks)
+    for name, data in (("LEFT", left_bytes), ("MIDDLE", middle_bytes), ("RIGHT", right_bytes)):
+        raw_blocks[name] = _run_ocr(preprocess_image(data))
+    logger.debug("OCR completed three cropped columns")
     return parse_ocr_blocks(raw_blocks)

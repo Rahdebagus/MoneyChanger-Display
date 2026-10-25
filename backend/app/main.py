@@ -6,6 +6,8 @@ Run with:  uvicorn app.main:app --reload --port 8000   (from backend/)
 import logging
 from contextlib import asynccontextmanager
 
+import anyio.to_thread
+
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -44,11 +46,13 @@ async def lifespan(application: FastAPI):
         settings.environment,
     )
 
-    await pump.start()
+    if settings.realtime_enabled:
+        await pump.start()
     try:
         yield
     finally:
-        await pump.stop()
+        if settings.realtime_enabled:
+            await pump.stop()
         logger.info("Shutdown complete")
 
 
@@ -76,6 +80,8 @@ def create_app() -> FastAPI:
 
     @application.middleware("http")
     async def request_context(request: Request, call_next):
+        # a2wsgi does not run ASGI lifespan; configure this event loop on HTTP.
+        anyio.to_thread.current_default_thread_limiter().total_tokens = settings.request_thread_limit
         request_id = request.headers.get("X-Request-ID") or new_request_id()
         set_request_id(request_id)
         try:
@@ -144,10 +150,12 @@ def create_app() -> FastAPI:
         media.router,
         ocr.router,
         device_api.router,
-        ws.router,
     )
     for router in api_routers:
         application.include_router(router, prefix="/api")
+
+    if settings.realtime_enabled:
+        application.include_router(ws.router, prefix="/api")
 
     if settings.enable_legacy_api:
         application.include_router(legacy.router)

@@ -12,12 +12,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# libgl1 + libglib2.0-0: OpenCV. ffmpeg: MP4 encoding (imageio-ffmpeg ships a
-# binary, but the system one is used when present and is smaller overall).
+# OpenCV runtime libraries; PNG generation uses Pillow in-process.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libgl1 \
         libglib2.0-0 \
-        ffmpeg \
         curl \
     && rm -rf /var/lib/apt/lists/*
 

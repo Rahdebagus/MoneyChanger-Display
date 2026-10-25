@@ -61,7 +61,7 @@ class VersionDetail(VersionSummary):
 
 
 class VersionCreate(BaseModel):
-    """Create a draft version and queue its board generation."""
+    """Save rates and return only after the PNG is available."""
 
     rates: Dict[str, Optional[str]] = Field(default_factory=dict)
     title: str = Field("MONEY CHANGER", max_length=128)
@@ -69,7 +69,7 @@ class VersionCreate(BaseModel):
     logo_base64: Optional[str] = None
     branch_id: Optional[int] = None
     source_version_id: Optional[int] = None
-    generate_video: bool = False
+    idempotency_key: Optional[str] = Field(None, min_length=8, max_length=128)
 
 
 class JobOut(ORMModel):
@@ -89,4 +89,5 @@ class JobOut(ORMModel):
 
 class GenerateResponse(BaseModel):
     version: VersionSummary
-    job: JobOut
+    # Deprecated response slot, retained for clients that inspect the envelope.
+    job: Optional[JobOut] = None

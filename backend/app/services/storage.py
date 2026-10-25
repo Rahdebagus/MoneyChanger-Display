@@ -24,14 +24,12 @@ from app.models import MediaAsset, MediaStatus
 MIME_BY_KIND = {
     "board_png": "image/png",
     "thumbnail": "image/jpeg",
-    "board_mp4": "video/mp4",
     "logo": "image/png",
 }
 
 EXT_BY_KIND = {
     "board_png": "png",
     "thumbnail": "jpg",
-    "board_mp4": "mp4",
     "logo": "png",
 }
 

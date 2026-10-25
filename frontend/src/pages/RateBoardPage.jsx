@@ -1,7 +1,7 @@
 // ─── Rate Board Generator Page ────────────────────────────────────────────────
 //
 // The original three-step flow, unchanged in look and sequence:
-//   Upload Image → OCR → Edit Rates → Generate → Download PNG/MP4
+//   Upload Image → OCR → Edit Rates → Generate → Download PNG
 //
 // What is new sits at the end of it: generating now also saves an immutable
 // version, and the result step offers "Tampilkan ke Display" alongside the
@@ -42,7 +42,6 @@ export default function RateBoardPage() {
     setBoardSubtitle,
     setBoardLogoUrl,
     setBranchId,
-    setVersion,
     handleOCRResult,
     loadFromVersion,
     generateAndSave,
@@ -73,7 +72,7 @@ export default function RateBoardPage() {
       })
       .finally(() => {
         // Clear the state so a refresh does not reload it again.
-        navigate(location.pathname, { replace: true, state: {} });
+        if (!cancelled) navigate(location.pathname, { replace: true, state: {} });
       });
 
     return () => {
@@ -158,7 +157,6 @@ export default function RateBoardPage() {
             key={version?.id}
             version={version}
             onReset={handleReset}
-            onVersionChange={setVersion}
           />
         )}
       </div>

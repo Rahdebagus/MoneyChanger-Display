@@ -14,8 +14,10 @@ class VersionInUse(ValueError):
 
 
 def delete_version(db: Session, version: RateVersion, user) -> None:
-    # The caller holds the version lock. Publishing and video requests acquire
+    # The caller holds the version lock. Publishing requests acquire
     # the same lock, so they cannot create a new consumer during this check.
+    if version.status == "generating":
+        raise VersionInUse("Versi masih diproses. Tunggu proses selesai sebelum menghapus.")
     if publishing.is_version_referenced(db, version.id):
         raise VersionInUse("Versi masih dipakai display atau jadwal. Ganti tayangan atau batalkan jadwal terlebih dahulu.")
     active_job = db.execute(

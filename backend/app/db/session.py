@@ -28,6 +28,8 @@ if not _is_sqlite:
         pool_size=_settings.db_pool_size,
         max_overflow=_settings.db_max_overflow,
         pool_recycle=_settings.db_pool_recycle,
+        pool_timeout=_settings.db_pool_timeout_seconds,
+        connect_args={"connect_timeout": 5, "read_timeout": 15, "write_timeout": 15},
     )
 
 engine: Engine = create_engine(_settings.database_url, **_engine_kwargs)
@@ -72,11 +74,11 @@ SessionLocal = sessionmaker(
 
 def get_db() -> Iterator[Session]:
     """FastAPI dependency: one session per request, always closed."""
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+    # Keep one physical connection until the request ends. A direct save may
+    # commit its draft before rendering while retaining its MariaDB advisory lock.
+    with engine.connect() as connection:
+        with SessionLocal(bind=connection) as db:
+            yield db
 
 
 @contextmanager

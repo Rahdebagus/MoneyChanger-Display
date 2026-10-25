@@ -5,8 +5,7 @@ not SQLite. The behaviour under test depends on SQL semantics that differ
 between engines - DECIMAL handling, row locking, guarded UPDATE rowcounts and
 unique-constraint races - so testing on SQLite would prove the wrong thing.
 
-Set TEST_DATABASE_URL to point somewhere else. The schema is created from the
-Alembic migration so the migration itself is exercised on every run.
+Set TEST_DATABASE_URL to point somewhere else. The schema is created from metadata; migrations are verified separately.
 """
 
 import os
@@ -22,6 +21,9 @@ TEST_DB_URL = os.environ.get(
     "TEST_DATABASE_URL",
     "mysql+pymysql://root:@127.0.0.1:3306/pam_rate_board_test?charset=utf8mb4",
 )
+from sqlalchemy.engine import make_url
+if not (make_url(TEST_DB_URL).database or "").endswith("_test"):
+    raise RuntimeError("Refusing to clear a database whose name does not end in _test")
 os.environ["DATABASE_URL"] = TEST_DB_URL
 os.environ["SECRET_KEY"] = "test-secret-key-not-used-anywhere-else"
 os.environ["ENVIRONMENT"] = "test"

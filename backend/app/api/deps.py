@@ -14,18 +14,23 @@ A device token cannot satisfy a user dependency and vice versa, because they
 are validated by different code paths against different columns.
 """
 
-from typing import List, Optional, Set
+from typing import Optional
 
 from fastapi import Depends, Header, HTTPException, Request, status
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.security import decode_access_token
 from app.core.timeutils import utcnow
 from app.db.session import get_db
-from app.models import Branch, Display, User, UserBranch, UserRole
+from app.models import Branch, Display, User, UserRole
 from app.services import pairing
+from app.services.access import (
+    BranchAccessDenied,
+    accessible_branch_ids,
+    user_branch_ids,  # Re-export for existing API callers.
+)
+from app.services.access import ensure_branch_access as _ensure_branch_access
 
 
 def _unauthorized(detail: str = "Tidak terautentikasi.") -> HTTPException:
@@ -98,37 +103,11 @@ def require_admin(user: User = Depends(get_current_user)) -> User:
     return user
 
 
-def user_branch_ids(db: Session, user: User) -> List[int]:
-    rows = db.execute(
-        select(UserBranch.branch_id).where(UserBranch.user_id == user.id)
-    ).scalars()
-    return list(rows)
-
-
-def accessible_branch_ids(db: Session, user: User) -> Optional[Set[int]]:
-    """Branches this user may touch.
-
-    None means "every branch" and is only ever returned for an admin. Callers
-    must treat None as unrestricted and a set as a hard filter.
-    """
-    if user.role == UserRole.ADMIN:
-        return None
-    return set(user_branch_ids(db, user))
-
-
 def ensure_branch_access(db: Session, user: User, branch_id: Optional[int]) -> None:
-    """Reject a staff member reaching outside their assigned branches.
-
-    A None branch_id is shared/global data, which staff may read but which is
-    still gated by the role checks on the individual routes.
-    """
-    allowed = accessible_branch_ids(db, user)
-    if allowed is None:
-        return
-    if branch_id is None:
-        return
-    if branch_id not in allowed:
-        raise _forbidden("Cabang ini bukan bagian dari penugasan Anda.")
+    try:
+        _ensure_branch_access(db, user, branch_id)
+    except BranchAccessDenied as exc:
+        raise _forbidden(str(exc)) from exc
 
 
 def ensure_display_access(db: Session, user: User, display: Display) -> None:

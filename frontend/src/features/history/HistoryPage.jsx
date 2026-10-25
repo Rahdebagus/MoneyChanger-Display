@@ -277,17 +277,6 @@ export default function HistoryPage() {
                   </Button>
                 )}
 
-                {version.mp4_url && (
-                  <Button
-                    size="sm"
-                    variant="subtle"
-                    disabled={busyId === version.id}
-                    onClick={() => download(version, "mp4")}
-                  >
-                    MP4
-                  </Button>
-                )}
-
                 {isAdmin && version.status === "ready" && (
                   <Button size="sm" onClick={() => setPublishTarget(version)}>
                     Tampilkan

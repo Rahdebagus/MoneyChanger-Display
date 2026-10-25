@@ -4,14 +4,13 @@ Saving a version never changes what a TV shows. Publishing is a separate,
 explicit action in publications.py.
 """
 
-import base64
-import binascii
 import logging
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.deps import (
     accessible_branch_ids,
@@ -24,9 +23,6 @@ from app.core.timeutils import utcnow
 from app.db.session import get_db
 from app.models import (
     Job,
-    JobStatus,
-    JobType,
-    MediaKind,
     RateBoard,
     RateVersion,
     User,
@@ -34,27 +30,12 @@ from app.models import (
 )
 from app.schemas.common import Message, Page
 from app.schemas.rates import GenerateResponse, JobOut, VersionCreate, VersionDetail, VersionSummary
-from app.services import audit, jobs, publishing, rates as rates_service, storage, version_cleanup
+from app.services import audit, direct_save, publishing, rates as rates_service, version_cleanup
+from app.services.access import BranchAccessDenied
 from app.services.rates import RateValidationError
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["rates"])
-
-MAX_LOGO_BYTES = 4 * 1024 * 1024
-
-
-def _decode_logo(raw: Optional[str]) -> Optional[bytes]:
-    if not raw:
-        return None
-    payload = raw.split(",", 1)[1] if "," in raw else raw
-    try:
-        data = base64.b64decode(payload, validate=True)
-    except (binascii.Error, ValueError):
-        raise HTTPException(status_code=400, detail="Logo tidak dapat dibaca.")
-    if len(data) > MAX_LOGO_BYTES:
-        raise HTTPException(status_code=400, detail="Ukuran logo maksimal 4MB.")
-    return data
-
 
 def _load_version(db: Session, version_id: int, user: User, *, lock: bool = False) -> RateVersion:
     stmt = select(RateVersion).where(RateVersion.id == version_id)
@@ -67,114 +48,26 @@ def _load_version(db: Session, version_id: int, user: User, *, lock: bool = Fals
     return version
 
 
-def _resolve_branch(db: Session, user: User, branch_id: Optional[int]) -> Optional[int]:
-    """Pick the branch a new version belongs to, honouring staff scope."""
-    allowed = accessible_branch_ids(db, user)
-
-    if branch_id is not None:
-        ensure_branch_access(db, user, branch_id)
-        return branch_id
-
-    if allowed is None:
-        return None
-    # A staff member with exactly one branch does not need to pick it.
-    if len(allowed) == 1:
-        return next(iter(allowed))
-    if not allowed:
-        raise HTTPException(
-            status_code=403, detail="Akun Anda belum ditugaskan ke cabang mana pun."
-        )
-    raise HTTPException(status_code=400, detail="Pilih cabang untuk versi ini.")
-
-
 @router.post("/versions", response_model=GenerateResponse, status_code=201)
 def create_version(
     payload: VersionCreate,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Create a draft version and queue board generation.
-
-    Returns immediately with a job id. The version only becomes ready - and
-    therefore publishable - once the worker has actually written the media.
-    """
+    """Persist rates, render PNG in-process, then return the ready version."""
     try:
-        parsed = rates_service.normalise_input(payload.rates)
+        version = direct_save.save(db, user, payload)
+    except BranchAccessDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except RateValidationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-    if not rates_service.has_any_value(parsed):
-        raise HTTPException(status_code=400, detail="Isi minimal satu nilai rate.")
-
-    branch_id = _resolve_branch(db, user, payload.branch_id)
-
-    source_version = None
-    if payload.source_version_id is not None:
-        source_version = _load_version(db, payload.source_version_id, user, lock=True)
-
-    logo_asset_id = None
-    logo_bytes = _decode_logo(payload.logo_base64)
-    if logo_bytes:
-        asset = storage.create_asset(
-            db,
-            kind=MediaKind.LOGO.value,
-            storage_key=f"logos/{storage.checksum_name(logo_bytes)}.png",
-            data=logo_bytes,
-        )
-        logo_asset_id = asset.id
-    elif source_version is not None:
-        logo_asset_id = source_version.logo_asset_id
-
-    board = rates_service.get_or_create_default_board(
-        db, owner_id=user.id, branch_id=branch_id, title=payload.title
-    )
-
-    version = rates_service.create_version(
-        db,
-        board=board,
-        rates=parsed,
-        board_title=payload.title,
-        board_subtitle=payload.subtitle,
-        created_by=user.id,
-        branch_id=branch_id,
-        logo_asset_id=logo_asset_id,
-        source_version_id=source_version.id if source_version else None,
-        config_snapshot={
-            "title": payload.title,
-            "subtitle": payload.subtitle,
-            "has_custom_logo": logo_asset_id is not None,
-        },
-    )
-
-    version.status = VersionStatus.GENERATING.value
-    job = jobs.enqueue(
-        db,
-        job_type=JobType.GENERATE_BOARD.value,
-        payload={"version_id": version.id, "generate_video": bool(payload.generate_video)},
-        version_id=version.id,
-        created_by=user.id,
-    )
-
-    audit.record(
-        db,
-        action="version.created",
-        actor_user_id=user.id,
-        actor_label=user.username,
-        target_type="rate_version",
-        target_id=version.id,
-        branch_id=branch_id,
-        details={
-            "version": version.version,
-            "source_version_id": payload.source_version_id,
-            "job_id": job.id,
-        },
-    )
-    db.commit()
-
-    return GenerateResponse(
-        version=serialize_version(db, version),
-        job=JobOut.model_validate(job),
-    )
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except direct_save.SaveError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.message) from exc
+    except SQLAlchemyError as exc:
+        db.rollback()
+        logger.exception("Database failure saving rate board")
+        raise HTTPException(status_code=503, detail="Penyimpanan belum dapat dikonfirmasi. Coba ulang dengan data yang sama.") from exc
+    return GenerateResponse(version=serialize_version(db, version), job=None)
 
 
 @router.get("/versions", response_model=Page[VersionSummary])
@@ -278,39 +171,6 @@ def duplicate_version(
     return serialize_version(db, draft, detail=True)
 
 
-@router.post("/versions/{version_id}/video", response_model=JobOut, status_code=202)
-def request_video(
-    version_id: int,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    version = _load_version(db, version_id, user, lock=True)
-    if version.png_asset_id is None:
-        raise HTTPException(status_code=409, detail="Board PNG belum tersedia.")
-    if version.mp4_asset_id is not None:
-        raise HTTPException(status_code=409, detail="Video sudah tersedia.")
-
-    existing = db.execute(
-        select(Job).where(
-            Job.version_id == version.id,
-            Job.job_type == JobType.GENERATE_VIDEO.value,
-            Job.status.in_([JobStatus.QUEUED.value, JobStatus.RUNNING.value]),
-        )
-    ).scalar_one_or_none()
-    if existing is not None:
-        return JobOut.model_validate(existing)
-
-    job = jobs.enqueue(
-        db,
-        job_type=JobType.GENERATE_VIDEO.value,
-        payload={"version_id": version.id},
-        version_id=version.id,
-        created_by=user.id,
-    )
-    db.commit()
-    return JobOut.model_validate(job)
-
-
 @router.post("/versions/{version_id}/archive", response_model=VersionSummary)
 def archive_version(
     version_id: int,
@@ -324,6 +184,8 @@ def archive_version(
     """
     version = _load_version(db, version_id, user, lock=True)
 
+    if version.status == VersionStatus.GENERATING.value:
+        raise HTTPException(status_code=409, detail="Versi masih dibuat. Tunggu proses selesai.")
     if publishing.is_version_referenced(db, version.id):
         raise HTTPException(
             status_code=409,

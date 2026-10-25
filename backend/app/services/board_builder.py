@@ -12,10 +12,9 @@ from typing import Optional, Tuple
 from PIL import Image
 from sqlalchemy.orm import Session
 
-from app.core.config import get_settings
-from app.models import MediaKind, RateVersion, VersionStatus
+from app.models import MediaKind, RateVersion
 from app.services import storage
-from app.services.generator import generate_rate_image, generate_video_from_image
+from app.services.generator import generate_rate_image
 from app.services.rates import rates_payload
 
 logger = logging.getLogger(__name__)
@@ -24,11 +23,12 @@ THUMBNAIL_WIDTH = 480
 
 
 def _image_size(data: bytes) -> Tuple[Optional[int], Optional[int]]:
-    try:
-        with Image.open(io.BytesIO(data)) as img:
-            return img.size
-    except Exception:
-        return None, None
+    with Image.open(io.BytesIO(data)) as img:
+        if img.format != "PNG" or img.size != (1280, 720):
+            raise ValueError("Renderer returned an invalid PNG board")
+        size = img.size
+        img.verify()
+        return size
 
 
 def _make_thumbnail(png_bytes: bytes) -> Optional[bytes]:
@@ -61,7 +61,7 @@ def _logo_bytes(db: Session, version: RateVersion) -> Optional[bytes]:
 
 
 def build_board(db: Session, version: RateVersion) -> RateVersion:
-    """Generate the PNG and thumbnail for a version and mark it ready.
+    """Write PNG and thumbnail; the caller commits readiness after verification.
 
     Status only moves to ready once the media is written and recorded. A
     version that fails here stays failed and can never be published.
@@ -98,49 +98,3 @@ def build_board(db: Session, version: RateVersion) -> RateVersion:
 
     db.flush()
     return version
-
-
-def build_video(db: Session, version: RateVersion) -> Optional[RateVersion]:
-    """Render the looping MP4 from the already-generated PNG.
-
-    Requires the PNG: the video is a re-encode of the exact board that was
-    approved, never a second independent render that could differ.
-    """
-    from app.models import MediaAsset
-
-    if version.png_asset_id is None:
-        raise ValueError("Board PNG belum tersedia untuk versi ini.")
-
-    png_asset = db.get(MediaAsset, version.png_asset_id)
-    if png_asset is None or not storage.asset_exists(png_asset):
-        raise ValueError("File board PNG tidak ditemukan.")
-
-    settings = get_settings()
-    png_bytes = storage.read_asset(png_asset)
-    mp4_bytes = generate_video_from_image(
-        png_bytes, duration_seconds=settings.video_duration_seconds
-    )
-
-    mp4_asset = storage.create_asset(
-        db,
-        kind=MediaKind.BOARD_MP4.value,
-        storage_key=storage.version_storage_key(version.id, MediaKind.BOARD_MP4.value),
-        data=mp4_bytes,
-    )
-    version.mp4_asset_id = mp4_asset.id
-    db.flush()
-    return version
-
-
-def discard_media(db: Session, version: RateVersion) -> None:
-    """Drop half-written media after a failed generate.
-
-    Targeted at this version's own directory only, so a failure never touches
-    another user's files.
-    """
-    version.png_asset_id = None
-    version.mp4_asset_id = None
-    version.thumbnail_asset_id = None
-    version.status = VersionStatus.FAILED.value
-    db.flush()
-    storage.delete_version_files(version.id)

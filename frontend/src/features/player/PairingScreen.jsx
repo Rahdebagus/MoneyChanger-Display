@@ -13,20 +13,24 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { deviceApi } from "../../services/apiClient.js";
 
-const POLL_MS = 3000;
+import { startPolling } from "../../utils/polling.js";
+
+const POLL_MS = 15000;
 
 export default function PairingScreen({ onPaired }) {
   const [code, setCode] = useState(null);
   const [session, setSession] = useState(null);
+  const [expiresAt, setExpiresAt] = useState(0);
   const [expiresIn, setExpiresIn] = useState(0);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(true);
 
-  const pollTimer = useRef(null);
-  const countdownTimer = useRef(null);
+  const starting = useRef(false);
   const mounted = useRef(true);
 
   const startPairing = useCallback(async () => {
+    if (starting.current) return;
+    starting.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -35,6 +39,7 @@ export default function PairingScreen({ onPaired }) {
       setCode(result.code);
       setSession(result.device_session);
       setExpiresIn(result.expires_in);
+      setExpiresAt(Date.now() + result.expires_in * 1000);
     } catch (err) {
       if (mounted.current) {
         setError(
@@ -44,6 +49,7 @@ export default function PairingScreen({ onPaired }) {
         );
       }
     } finally {
+      starting.current = false;
       if (mounted.current) setBusy(false);
     }
   }, []);
@@ -54,59 +60,38 @@ export default function PairingScreen({ onPaired }) {
     return () => {
       mounted.current = false;
       clearTimeout(startup);
-      clearTimeout(pollTimer.current);
-      clearInterval(countdownTimer.current);
     };
   }, [startPairing]);
 
-  // Countdown, and request a fresh code once this one expires.
+  // Derive expiry from wall time; background tab throttling cannot extend a code.
   useEffect(() => {
-    clearInterval(countdownTimer.current);
-    if (!expiresIn) return undefined;
-
-    countdownTimer.current = setInterval(() => {
-      setExpiresIn((value) => {
-        if (value <= 1) {
-          clearInterval(countdownTimer.current);
-          startPairing();
-          return 0;
-        }
-        return value - 1;
-      });
+    if (!expiresAt) return undefined;
+    const timer = setInterval(() => {
+      const remaining = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
+      setExpiresIn(remaining);
+      if (!remaining && !document.hidden && navigator.onLine) {
+        clearInterval(timer);
+        startPairing();
+      }
     }, 1000);
+    return () => clearInterval(timer);
+  }, [expiresAt, startPairing]);
 
-    return () => clearInterval(countdownTimer.current);
-  }, [expiresIn, startPairing]);
-
-  // Poll until an admin approves, then claim the credential exactly once.
   useEffect(() => {
     if (!session) return undefined;
-
-    const poll = async () => {
-      try {
-        const status = await deviceApi.pairingStatus(session);
-
-        if (status.state === "approved") {
-          const claim = await deviceApi.claim(session);
-          if (mounted.current) onPaired(claim.device_token);
-          return;
-        }
-
-        if (status.state === "expired") {
-          startPairing();
-          return;
-        }
-      } catch {
-        /* keep polling: a transient network blip must not strand the TV */
+    let claimed = false;
+    const poller = startPolling(async (signal) => {
+      if (claimed) return;
+      const status = await deviceApi.pairingStatus(session, { signal });
+      if (signal.aborted) return;
+      if (status.state === "approved") {
+        const claim = await deviceApi.claim(session, { signal });
+        if (!signal.aborted) { claimed = true; onPaired(claim.device_token); }
+      } else if (status.state === "expired") {
+        await startPairing();
       }
-
-      if (mounted.current) {
-        pollTimer.current = setTimeout(poll, POLL_MS);
-      }
-    };
-
-    pollTimer.current = setTimeout(poll, POLL_MS);
-    return () => clearTimeout(pollTimer.current);
+    }, { intervalMs: POLL_MS });
+    return () => poller.stop();
   }, [session, onPaired, startPairing]);
 
   const goFullscreen = () => {

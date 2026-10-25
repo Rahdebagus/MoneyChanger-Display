@@ -1,53 +1,40 @@
 # Architecture
 
-## Shape
+## Request flow
 
-```
-          ┌────────────┐         ┌────────────┐
-  admin → │  React SPA │ ──────► │  FastAPI   │ ◄──── TV player (/display)
-          └────────────┘  REST   │   (api)    │  REST + WS
-                           + WS  └─────┬──────┘
-                                       │
-                           ┌───────────┴───────────┐
-                           │                       │
-                    ┌──────▼──────┐       ┌────────▼────────┐
-                    │ MySQL /     │       │ storage/        │
-                    │ MariaDB     │       │ media + flags   │
-                    └──────▲──────┘       └────────▲────────┘
-                           │                       │
-                    ┌──────┴───────────────────────┴──────┐
-                    │ worker: job queue + scheduler       │
-                    │ (OCR models, Pillow, ffmpeg)        │
-                    └─────────────────────────────────────┘
-```
+React editor -> authenticated FastAPI save -> MariaDB rates/receipt commit ->
+Pillow PNG + thumbnail -> atomic file rename -> ready commit -> preview.
+Publish remains a separate authorized action. The API renders in-process;
+standard saves create no jobs and launch no processes. The optional worker
+handles media cleanup and scheduled publication only.
 
-Three processes: **api**, **worker**, **frontend**. No Redis, no broker — the
-job queue and the scheduler both live in MySQL (see *Jobs* below), which is
-enough at this volume and one less service to operate.
+Passenger uses HTTP polling with REALTIME_ENABLED=false. ASGI deployments may
+enable WebSockets. No Node runtime is needed to serve the compiled frontend.
 
----
+## Rendering and concurrency
 
-## The board generator is untouched
+The original 1280 x 720 drawing constants, fonts, colors and composition are
+unchanged. Flags ship in backend/assets/flags, with the existing storage flag
+cache taking precedence. Fonts, resized flags and the template use bounded
+in-process caches. A per-request copy protects the cached background.
+The regression test compares PNG bytes against the approved fixture.
 
-`backend/app/services/generator.py` is the original Pillow renderer. Only two
-things changed when it moved into the package:
+A MariaDB advisory lock serializes PNG work across Passenger processes. It
+waits at most two seconds, then returns a retryable 503. The HTTP session pins
+one physical connection across commits so GET_LOCK cannot escape to another
+request. RateBoard row locks protect version numbering, including duplicates.
 
-1. `ASSET_DIR` now comes from configuration instead of being derived from the
-   module's own path, so the package can move.
-2. Flags are cached on disk under `storage/flags/` instead of being fetched
-   from `flagcdn.com` on every run.
+Save receipts hash the actor plus client key and normalized payload. A repeat
+returns the original ready version; a failed/interrupted attempt retries that
+same version. Changing the payload with an existing key returns 409. Deletion
+leaves a tombstone (410 on retry), with optional expiry after 30 days. Old
+clients may omit the key but then have no retry deduplication guarantee.
 
-Every drawing constant — canvas size, colours, column widths, fonts, row
-height, flag slot, USD sub-labels, footer — is byte-for-byte as it was.
-`backend/tests/test_generator_regression.py` renders a fixture and compares the
-PNG hash against `tests/fixtures/baseline_board.png`, so a drift fails the
-build rather than reaching a TV.
-
-The flag cache was worth it on its own: generating a board went from **7.26s**
-(cold, fetching 20 flags over the network) to **0.09s**, with identical output.
-It also means the worker no longer depends on an external CDN being reachable.
-
----
+Rates commit before rendering. File writes use flush/fsync + atomic rename.
+Readiness commits only after the PNG validates and exists. Failed final commits
+roll back media metadata; a retry repairs files. Uncertain commits are reread
+before marking failure, so a valid committed PNG is never deleted blindly.
+Interrupted requests can be recovered explicitly using app.maintenance.
 
 ## Data model
 
@@ -138,31 +125,21 @@ the same time cannot collide — no shared `preview_board.png`.
 
 ---
 
-## Jobs
+## Maintenance and OCR
 
-OCR, PNG rendering and MP4 encoding are too slow for a request, so they are
-durable jobs owned by the worker.
+Only cleanup_media jobs are claimed by the worker. No PNG or video jobs are
+enqueued. Historical generation jobs can be reviewed and recovered explicitly;
+they are never executed by the new worker. Worker claims and scheduled
+publication retain their guarded updates and leases.
 
-Claiming avoids `SELECT ... FOR UPDATE SKIP LOCKED`, which **MariaDB 10.4 does
-not support** (it arrived in 10.6). Instead a worker reads candidate ids and
-issues a guarded update:
+OCR stays lazy: importing the API or saving PNG never imports Paddle. Inference
+has one slot per process and rejects busy requests after one second. Paddle,
+OpenCV and BLAS CPU threads default to one. Uploads are bounded to 10 MB and
+8 million pixels, and cropped blocks are processed sequentially. The verified
+PaddleOCR 2.7.3 / PaddlePaddle 2.6.2 pins remain unchanged.
 
-```sql
-UPDATE jobs SET status='running', claim_token=:tok
- WHERE id=:id AND status='queued'
-```
-
-Exactly one worker sees `rowcount == 1`. Every later write also carries the
-claim token, so a worker whose lease expired cannot clobber the result of the
-one that took over. Leases expire; `recover_stale()` runs at startup and on a
-timer, so a crash requeues work instead of stranding a version in `generating`.
-
-OCR runs in the API process, in a threadpool (the routes are plain `def`), with
-a semaphore capping concurrency at one so simultaneous uploads cannot multiply
-the model's memory. The paddle import is deferred to first use, so an API
-process serving only auth, history and display traffic never loads it.
-
----
+See [deployment and limits](direct-png-deployment.md) for optional maintenance,
+soft render budgets, scheduler requirements and explicit interrupted-save recovery.
 
 ## The publishing protocol
 
@@ -249,7 +226,7 @@ of latency.
   `index.html` and the hashed build assets, so reloading while offline still
   boots the player. API traffic is never cached there.
 - **Board media** — cached by the player itself in the **Cache Storage API**,
-  because an MP4 is far too large for `localStorage` and memory does not survive
+  because binary media is too large for `localStorage` and memory does not survive
   a reload. Eviction is oldest-first and always protects whatever is on screen.
 - **Pointer state** — which media, revision and expiry are current is small
   enough for `localStorage`.

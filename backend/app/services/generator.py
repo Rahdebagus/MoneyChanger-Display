@@ -1,8 +1,6 @@
 import io
 import os
-import subprocess
-import tempfile
-import urllib.request
+from functools import lru_cache
 from typing import Dict
 from PIL import Image, ImageDraw, ImageFont
 from app.core.config import get_settings
@@ -28,10 +26,7 @@ C_GRID = (255, 255, 255)
 C_BLACK = (0, 0, 0)
 
 
-# --- Flag CDN config ---
-# Maps currency code -> ISO 3166-1 alpha-2 country code used by flagcdn.com
-FLAG_CDN_BASE = "https://flagcdn.com/h80"   # 80px-tall PNGs  (h80/<cc>.png)
-
+# Currency flags are bundled locally; rendering never waits for a CDN.
 CURRENCY_TO_CC = {
     "USD":   "us",
     "USD T": "us",
@@ -60,55 +55,21 @@ CURRENCY_TO_CC = {
 _flag_cache: Dict[str, Image.Image | None] = {}
 
 
-def _fetch_flag(cc: str) -> Image.Image | None:
-    """Download a flag PNG from flagcdn.com and return a PIL Image (RGBA).
-    Returns None on any network / decode error so rendering degrades gracefully.
-    Flags are cached in memory for the lifetime of the process.
-    """
+def _fetch_flag(cc: str) -> Image.Image:
     if cc in _flag_cache:
         return _flag_cache[cc]
-
-    cache_file = os.path.join(FLAG_CACHE_DIR, f"{cc}.png")
-    data = None
-
-    # Disk cache first: a worker that generates boards must not depend on
-    # flagcdn.com being reachable on every run. The cached bytes are exactly
-    # what the CDN returned, so the rendered board is unchanged.
-    if os.path.exists(cache_file):
-        try:
-            with open(cache_file, "rb") as f:
-                data = f.read()
-        except OSError:
-            data = None
-
-    if data is None:
-        url = f"{FLAG_CDN_BASE}/{cc}.png"
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                data = resp.read()
-        except Exception:
-            data = None
-
-        if data is not None:
-            try:
-                os.makedirs(FLAG_CACHE_DIR, exist_ok=True)
-                tmp_file = f"{cache_file}.{os.getpid()}.tmp"
-                with open(tmp_file, "wb") as f:
-                    f.write(data)
-                os.replace(tmp_file, cache_file)
-            except OSError:
-                pass
-
-    try:
-        flag = Image.open(io.BytesIO(data)).convert("RGBA") if data else None
-    except Exception:
-        flag = None
-
-    _flag_cache[cc] = flag
-    return flag
+    candidates = [os.path.join(FLAG_CACHE_DIR, f"{cc}.png"),
+                  os.path.join(ASSET_DIR, "flags", f"{cc}.png")]
+    for filename in candidates:
+        if os.path.isfile(filename):
+            with Image.open(filename) as source:
+                flag = source.convert("RGBA")
+            _flag_cache[cc] = flag
+            return flag
+    raise FileNotFoundError(f"Missing bundled flag: {cc}.png")
 
 
+@lru_cache(maxsize=48)
 def _get_flag(currency_code: str, target_h: int = 32) -> Image.Image | None:
     """Return a flag image scaled to *target_h* pixels tall for *currency_code*.
     Using a higher-res CDN source (h80) ensures sharpness at the display size.
@@ -127,6 +88,7 @@ def _get_flag(currency_code: str, target_h: int = 32) -> Image.Image | None:
 # -----------------------------------------------------------------------
 
 
+@lru_cache(maxsize=32)
 def load_font(size: int, bold: bool = False):
     paths = [
         "C:/Windows/Fonts/arialbd.ttf" if bold else "C:/Windows/Fonts/arial.ttf",
@@ -163,10 +125,11 @@ def draw_logo(img: Image.Image, logo_bytes: bytes | None = None):
     logo_img = None
 
     if logo_bytes is not None:
-        try:
-            logo_img = Image.open(io.BytesIO(logo_bytes)).convert("RGBA")
-        except Exception:
-            logo_img = None
+        with Image.open(io.BytesIO(logo_bytes)) as source:
+            if (source.width * source.height > 4_000_000 or max(source.size) > 4096
+                    or source.height * LOGO_W / source.width > 2048):
+                raise ValueError("Logo dimensions exceed rendering limits")
+            logo_img = source.convert("RGBA")
 
     if logo_img is None and os.path.exists(DEFAULT_LOGO_PATH):
         try:
@@ -332,16 +295,20 @@ def draw_table(draw, rates: Dict[str, float], img: Image.Image | None = None):
     )
 
 
+@lru_cache(maxsize=1)
+def _background(path: str, modified_ns: int) -> Image.Image:
+    with Image.open(path) as source:
+        return source.convert("RGB").resize((IMG_W, IMG_H), Image.LANCZOS)
+
+
 def generate_rate_image(
     rates: Dict[str, float],
     title: str = "MONEY CHANGER",
     subtitle: str = "PT. PRADNYANA ARTHA MANDIRI",
     logo_bytes: bytes | None = None,
 ) -> bytes:
-    if os.path.exists(BG_PATH):
-        img = Image.open(BG_PATH).convert("RGB").resize((IMG_W, IMG_H), Image.LANCZOS)
-    else:
-        img = Image.new("RGB", (IMG_W, IMG_H), (245, 245, 245))
+    # Copy the cached template before drawing; never mutate the shared image.
+    img = _background(BG_PATH, os.stat(BG_PATH).st_mtime_ns).copy()
 
     d = ImageDraw.Draw(img)
 
@@ -354,66 +321,3 @@ def generate_rate_image(
     output.seek(0)
 
     return output.read()
-
-
-def generate_video_from_image(image_bytes: bytes, duration_seconds: int = 600) -> bytes:
-    """Convert a PNG image to a static H.264 MP4 video using the bundled FFmpeg.
-
-    Uses ffmpeg -loop so only one keyframe is stored — the resulting file is
-    very small despite the 10-minute duration (typically 1–5 MB).
-    """
-    try:
-        import imageio_ffmpeg
-        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
-    except Exception:
-        ffmpeg_exe = "ffmpeg"   # fall back to system ffmpeg if available
-
-    # Write source PNG to a temp file (ffmpeg needs a file path, not a stream)
-    png_fd, png_path = tempfile.mkstemp(suffix=".png")
-    mp4_fd, mp4_path = tempfile.mkstemp(suffix=".mp4")
-    os.close(png_fd)
-    os.close(mp4_fd)
-
-    try:
-        with open(png_path, "wb") as f:
-            f.write(image_bytes)
-
-        # Ensure even dimensions (H.264 requirement)
-        with Image.open(io.BytesIO(image_bytes)) as src:
-            w, h = src.size
-            if w % 2 or h % 2:
-                w -= w % 2
-                h -= h % 2
-                resized = io.BytesIO()
-                src.resize((w, h), Image.LANCZOS).save(resized, format="PNG")
-                with open(png_path, "wb") as f:
-                    f.write(resized.getvalue())
-
-        subprocess.run(
-            [
-                ffmpeg_exe,
-                "-y",                          # overwrite output without asking
-                "-loop", "1",                  # loop the single image
-                "-i", png_path,                # input image
-                "-c:v", "libx264",             # H.264 codec
-                "-t", str(duration_seconds),   # total duration in seconds
-                "-pix_fmt", "yuv420p",         # required for broad compatibility
-                "-crf", "18",                  # quality (lower = better; 18 is high quality)
-                "-preset", "ultrafast",        # fastest encoding, small file for static content
-                "-an",                         # no audio track
-                "-movflags", "+faststart",     # optimise for streaming/download
-                mp4_path,
-            ],
-            check=True,
-            capture_output=True,
-            timeout=180,
-        )
-
-        with open(mp4_path, "rb") as f:
-            return f.read()
-
-    finally:
-        if os.path.exists(png_path):
-            os.unlink(png_path)
-        if os.path.exists(mp4_path):
-            os.unlink(mp4_path)

@@ -19,7 +19,7 @@ from app.models.enums import JobStatus
 
 
 class Job(Base, IntPK, TimestampMixin):
-    """A unit of slow work (OCR, PNG, MP4) owned by the worker process.
+    """Durable maintenance work; new PNG saves do not create queue records.
 
     Claiming uses a guarded UPDATE rather than SELECT ... FOR UPDATE SKIP
     LOCKED: MariaDB 10.4 has no SKIP LOCKED (it arrived in 10.6), and an

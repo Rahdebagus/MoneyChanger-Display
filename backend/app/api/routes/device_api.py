@@ -6,10 +6,11 @@ cannot list displays, read other branches, or reach any admin route - those
 live behind user dependencies that a device token can never satisfy.
 """
 
+import hashlib
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -80,11 +81,11 @@ def start_pairing(request: Request, db: Session = Depends(get_db)):
 
 @router.get("/pairing/status", response_model=PairingStatusResponse)
 def pairing_status(
-    device_session: str,
     request: Request,
+    device_session: str = Query(..., max_length=128),
     db: Session = Depends(get_db),
 ):
-    if not _pairing_limiter.check(f"status:{_client_key(request)}"):
+    if not _pairing_limiter.check(f"status:{_client_key(request)}:{hashlib.sha256(device_session.encode()).hexdigest()}"):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Terlalu banyak permintaan. Coba lagi nanti.",
@@ -156,7 +157,6 @@ def _assignment_media(db: Session, version: RateVersion) -> list:
     media = []
     for asset_id, kind in (
         (version.png_asset_id, "board_png"),
-        (version.mp4_asset_id, "board_mp4"),
     ):
         if asset_id is None:
             continue

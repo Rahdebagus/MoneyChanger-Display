@@ -1,3 +1,5 @@
+<!-- Historical report for the earlier release. Current implementation and validation: direct-png-deployment.md and direct-png-report.md. Video/worker claims below describe the old release only. -->
+
 # Implementation Status — PAM Rate Board & Remote Display
 
 Working log across sessions. Specification:

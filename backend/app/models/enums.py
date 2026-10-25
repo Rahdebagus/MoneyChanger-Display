@@ -26,7 +26,6 @@ class VersionStatus(str, Enum):
 
 class MediaKind(str, Enum):
     BOARD_PNG = "board_png"
-    BOARD_MP4 = "board_mp4"
     THUMBNAIL = "thumbnail"
     LOGO = "logo"
 
@@ -61,8 +60,6 @@ class TargetState(str, Enum):
 
 
 class JobType(str, Enum):
-    GENERATE_BOARD = "generate_board"
-    GENERATE_VIDEO = "generate_video"
     OCR_EXTRACT = "ocr_extract"
     CLEANUP_MEDIA = "cleanup_media"
 

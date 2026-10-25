@@ -1,7 +1,7 @@
 // ─── Player Media Cache ───────────────────────────────────────────────────────
 //
 // A TV must keep showing the right board when the network drops, including
-// across a reload. That rules out memory and localStorage: an MP4 is far too
+// across a reload. That rules out memory and localStorage: binary media is too
 // large for localStorage, and memory does not survive a refresh.
 //
 // Media bytes therefore live in the Cache Storage API, and the small pointer

@@ -1,5 +1,7 @@
 # Deployment & operations
 
+For the installed cPanel/Passenger application, use [direct PNG deployment](direct-png-deployment.md). The Docker/standalone examples below are alternatives, not commands to overwrite an existing Passenger installation.
+
 ## Before anything else
 
 - `SECRET_KEY` must be set. In production the app refuses to start without it.
@@ -28,7 +30,7 @@ docker compose exec api python -m app.cli create-admin
 | --- | --- |
 | `db` | MySQL 8, UTC, `STRICT_TRANS_TABLES`, private network only |
 | `api` | FastAPI on :8000 |
-| `worker` | job queue + publication scheduler |
+| `worker` | optional media cleanup + publication scheduler; no PNG generation |
 | `frontend` | nginx serving the built SPA on :8080 |
 
 Volumes: `db_data`, `media_data` (generated boards — back this up), and
@@ -170,8 +172,7 @@ Keep that directory; in Docker it is the `paddle_models` volume.
 
 ### A version is stuck in `generating`
 
-The worker is not running. Start `python -m app.workers.runner`. Jobs whose
-worker died are requeued automatically once their lease expires.
+Retry the save with the same data and idempotency key. New saves render inside the API. For an interrupted or pre-upgrade queued version, inspect `python -m app.maintenance recover-png --version-id ID`, then add `--apply` after stopping the old worker. See the direct-PNG guide for hosting limits.
 
 ### Port 8000 already in use
 

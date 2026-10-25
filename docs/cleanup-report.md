@@ -1,3 +1,5 @@
+<!-- Historical report for the earlier release. Current implementation and validation: direct-png-deployment.md and direct-png-report.md. Video/worker claims below describe the old release only. -->
+
 # Cleanup report
 
 Update 2026-10-24: the project now uses one repository at its root for backend

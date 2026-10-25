@@ -9,7 +9,7 @@ on and must not shift.
 from decimal import Decimal, InvalidOperation
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.timeutils import utcnow
@@ -142,7 +142,8 @@ def rates_as_strings(items: Iterable[RateItem]) -> Dict[str, Optional[str]]:
 
 def next_version_number(db: Session, board_id: int) -> int:
     current = db.execute(
-        select(func.max(RateVersion.version)).where(RateVersion.board_id == board_id)
+        select(RateVersion.version).where(RateVersion.board_id == board_id)
+        .order_by(RateVersion.version.desc()).limit(1).with_for_update()
     ).scalar()
     return int(current or 0) + 1
 
@@ -175,6 +176,8 @@ def create_version(
     source_version_id: Optional[int] = None,
     config_snapshot: Optional[dict] = None,
 ) -> RateVersion:
+    # Serialize number allocation, including the separate duplicate endpoint.
+    db.execute(select(RateBoard.id).where(RateBoard.id == board.id).with_for_update()).scalar_one()
     version = RateVersion(
         board_id=board.id,
         version=next_version_number(db, board.id),

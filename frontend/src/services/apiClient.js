@@ -201,7 +201,7 @@ export const ocrApi = {
 // ─── Versions / history ───────────────────────────────────────────────────────
 
 export const versionApi = {
-  create: (payload) => request("/api/versions", { method: "POST", body: payload }),
+  create: (payload, options = {}) => request("/api/versions", { ...options, method: "POST", body: payload, timeoutMs: 45000 }),
   list: (params = {}, options = {}) => {
     const query = new URLSearchParams();
     Object.entries(params).forEach(([key, value]) => {
@@ -214,7 +214,6 @@ export const versionApi = {
   },
   get: (id) => request(`/api/versions/${id}`),
   duplicate: (id) => request(`/api/versions/${id}/duplicate`, { method: "POST" }),
-  requestVideo: (id) => request(`/api/versions/${id}/video`, { method: "POST" }),
   archive: (id) => request(`/api/versions/${id}/archive`, { method: "POST" }),
   restore: (id) => request(`/api/versions/${id}/restore`, { method: "POST" }),
   remove: (id) => request(`/api/versions/${id}`, { method: "DELETE" }),
@@ -319,13 +318,15 @@ export const deviceApi = {
       token: null,
       skipAuthRedirect: true,
     }),
-  pairingStatus: (session) =>
+  pairingStatus: (session, options = {}) =>
     request(`/api/device/pairing/status?device_session=${encodeURIComponent(session)}`, {
+      ...options,
       token: null,
       skipAuthRedirect: true,
     }),
-  claim: (session) =>
+  claim: (session, options = {}) =>
     request("/api/device/pairing/claim", {
+      ...options,
       method: "POST",
       body: { device_session: session },
       token: null,

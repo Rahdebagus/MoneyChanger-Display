@@ -23,8 +23,7 @@ from app.models import (
     TargetState,
     VersionStatus,
 )
-from app.services import board_builder, jobs as jobs_service, publishing
-from app.services import rates as rates_service
+from app.services import jobs as jobs_service, publishing
 
 FIXTURE_RATES = json.loads(
     (Path(__file__).parent / "fixtures" / "baseline_rates.json").read_text("utf-8")
@@ -35,7 +34,7 @@ FIXTURE_RATES = json.loads(
 # Helpers
 # --------------------------------------------------------------------------
 def make_ready_version(client, auth, branch_id, overrides=None):
-    """Create a version through the API, then run the generate job inline."""
+    """The save response must already contain a usable PNG, without a worker."""
     rates = {k: str(v) for k, v in FIXTURE_RATES.items()}
     rates.update(overrides or {})
 
@@ -52,14 +51,8 @@ def make_ready_version(client, auth, branch_id, overrides=None):
     assert response.status_code == 201, response.text
     version_id = response.json()["version"]["id"]
 
-    db = SessionLocal()
-    try:
-        version = db.get(RateVersion, version_id)
-        board_builder.build_board(db, version)
-        rates_service.mark_ready(db, version)
-        db.commit()
-    finally:
-        db.close()
+    assert response.json()["version"]["status"] == "ready"
+    assert response.json()["job"] is None
 
     return version_id
 
@@ -193,6 +186,9 @@ def test_cannot_publish_a_version_that_is_not_ready(client, auth, branches):
         headers=auth,
     )
     version_id = created.json()["version"]["id"]
+    with SessionLocal() as draft_db:
+        draft_db.get(RateVersion, version_id).status = "draft"
+        draft_db.commit()
     display_id, _device = pair_display(client, auth, branch_id=branches["kuta"])
 
     response = client.post(
@@ -543,16 +539,9 @@ def test_cancelled_schedule_never_fires(client, auth, branches):
 # Jobs
 # --------------------------------------------------------------------------
 def test_a_job_is_claimed_by_exactly_one_worker(client, auth, branches):
-    client.post(
-        "/api/versions",
-        json={
-            "rates": {"USD": "16950"},
-            "title": "MONEY CHANGER",
-            "subtitle": "PT. PRADNYANA ARTHA MANDIRI",
-            "branch_id": branches["kuta"],
-        },
-        headers=auth,
-    )
+    with SessionLocal() as queue_db:
+        jobs_service.enqueue(queue_db, job_type="cleanup_media", payload={"deleted_version_id": 999, "asset_ids": []})
+        queue_db.commit()
 
     db_one = SessionLocal()
     db_two = SessionLocal()
@@ -568,16 +557,9 @@ def test_a_job_is_claimed_by_exactly_one_worker(client, auth, branches):
 
 
 def test_stale_job_is_requeued_after_its_lease_expires(client, auth, branches, db):
-    client.post(
-        "/api/versions",
-        json={
-            "rates": {"USD": "16950"},
-            "title": "MONEY CHANGER",
-            "subtitle": "PT. PRADNYANA ARTHA MANDIRI",
-            "branch_id": branches["kuta"],
-        },
-        headers=auth,
-    )
+    with SessionLocal() as queue_db:
+        jobs_service.enqueue(queue_db, job_type="cleanup_media", payload={"deleted_version_id": 999, "asset_ids": []})
+        queue_db.commit()
 
     worker_db = SessionLocal()
     try:

@@ -1,6 +1,6 @@
 // ─── TV Player ────────────────────────────────────────────────────────────────
 //
-// Shows the PNG or MP4 the generator produced, nothing else. No watermark, no
+// Shows the PNG the generator produced, nothing else. No watermark, no
 // ticker, no re-drawn board: the file is displayed with object-fit: contain on
 // a black background, so it is never stretched or cropped.
 //
@@ -30,6 +30,7 @@ import { startPolling } from "../../utils/polling.js";
 
 const DEFAULT_HEARTBEAT_MS = 30000;
 const DEFAULT_POLL_MS = 5 * 60 * 1000;
+const USE_WEBSOCKETS = import.meta.env.VITE_ENABLE_WEBSOCKETS !== "false";
 const MAX_BACKOFF_MS = 60000;
 
 /** Exponential backoff with jitter, so many TVs never reconnect in lockstep. */
@@ -91,7 +92,7 @@ export default function PlayerPage() {
     mounted.current = true;
     let cancelled = false;
     const saved = cache.readState();
-    const restored = saved?.mediaUrl ? cache.getMedia(saved.mediaUrl) : Promise.resolve(null);
+    const restored = saved?.mediaUrl && saved.kind === "board_png" ? cache.getMedia(saved.mediaUrl) : Promise.resolve(null);
     restored.then((blob) => {
       if (cancelled || objectUrl.current || applying.current) return;
       if (!blob) {
@@ -154,8 +155,7 @@ export default function PlayerPage() {
     if (assignment.revision <= currentRevision.current && contentRef.current) return;
 
     const media =
-      assignment.media.find((item) => item.kind === "board_png") ||
-      assignment.media.find((item) => item.kind === "board_mp4");
+      assignment.media.find((item) => item.kind === "board_png");
 
     if (!media) return;
 
@@ -190,9 +190,8 @@ export default function PlayerPage() {
 
       nextUrl = URL.createObjectURL(blob);
 
-      // Validate by actually decoding. A truncated PNG or an MP4 this device
-      // cannot play must not replace a working picture.
-      await validateMedia(nextUrl, media.kind);
+      // Decode before replacing a working picture.
+      await validateMedia(nextUrl);
       if (!mounted.current || controller.signal.aborted) return;
 
       const previousUrl = objectUrl.current;
@@ -332,10 +331,10 @@ export default function PlayerPage() {
     };
 
     const heartbeat = startPolling(beat, {
-      intervalMs: DEFAULT_HEARTBEAT_MS, pauseWhenHidden: false,
+      intervalMs: DEFAULT_HEARTBEAT_MS,
     });
     const assignment = startPolling((signal) => syncAssignment("poll", signal), {
-      intervalMs: DEFAULT_POLL_MS, pauseWhenHidden: false,
+      intervalMs: DEFAULT_POLL_MS,
     });
 
     return () => {
@@ -346,7 +345,7 @@ export default function PlayerPage() {
 
   // ── Websocket for instant updates ─────────────────────────────────────────
   useEffect(() => {
-    if (!deviceToken) return undefined;
+    if (!deviceToken || !USE_WEBSOCKETS) return undefined;
 
     const handles = timers.current;
     let attempt = 0;
@@ -431,11 +430,11 @@ export default function PlayerPage() {
     []
   );
 
-  const handlePaired = (token) => {
+  const handlePaired = useCallback((token) => {
     writeStored(DEVICE_TOKEN_KEY, token);
     setDeviceToken(token);
     setStatus("syncing");
-  };
+  }, []);
 
   if (!deviceToken) {
     return <PairingScreen onPaired={handlePaired} />;
@@ -444,25 +443,12 @@ export default function PlayerPage() {
   return (
     <Stage>
       {content && status !== "expired" ? (
-        content.kind === "board_mp4" ? (
-          <video
-            key={content.url}
-            src={content.url}
-            autoPlay
-            muted
-            loop
-            playsInline
-            style={mediaStyle}
-            onError={() => setStatus("error")}
-          />
-        ) : (
           <img
             key={content.url}
             src={content.url}
             alt="Rate board"
             style={mediaStyle}
           />
-        )
       ) : (
         <Notice status={status} online={online} />
       )}
@@ -474,25 +460,9 @@ export default function PlayerPage() {
 }
 
 /** Decode the media before it is allowed on screen. */
-function validateMedia(url, kind) {
+function validateMedia(url) {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error("Media timeout")), 30000);
-
-    if (kind === "board_mp4") {
-      const video = document.createElement("video");
-      video.muted = true;
-      video.preload = "auto";
-      video.onloadeddata = () => {
-        clearTimeout(timeout);
-        resolve();
-      };
-      video.onerror = () => {
-        clearTimeout(timeout);
-        reject(new Error("Video tidak dapat diputar di perangkat ini"));
-      };
-      video.src = url;
-      return;
-    }
 
     const image = new Image();
     image.onload = () => {

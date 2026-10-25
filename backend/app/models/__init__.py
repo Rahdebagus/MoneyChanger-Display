@@ -20,6 +20,7 @@ from app.models.media import MediaAsset
 from app.models.publication import Publication, PublicationTarget
 from app.models.rate import RateBoard, RateItem, RateVersion
 from app.models.user import Branch, User, UserBranch
+from app.models.save_request import SaveRequest
 
 __all__ = [
     "Base",
@@ -43,6 +44,7 @@ __all__ = [
     "RateBoard",
     "RateItem",
     "RateVersion",
+    "SaveRequest",
     "TargetState",
     "User",
     "UserBranch",

@@ -71,10 +71,10 @@ services:
       SECRET_KEY: ${SECRET_KEY}
       STORAGE_DIR: /data/storage
     volumes:
-      # Same volume as the API: the worker writes the media the API serves.
+      # Shared media volume: maintenance reclaims files from deleted history.
       - media_data:/data/storage
       - paddle_models:/root/.paddleocr
-    # Runs both the job queue and the publication scheduler. Safe to scale:
+    # Optional for saving PNG; needed for cleanup and scheduled publication:
     # claims are atomic, so no job or schedule ever runs twice.
     command: ["python", "-m", "app.workers.runner"]
 

@@ -13,7 +13,11 @@ The heavy paddle import is deferred to first use, so an API process that only
 serves auth, history and display traffic never pays for it.
 """
 
+import io
 import logging
+from contextlib import contextmanager
+
+from PIL import Image
 import threading
 from typing import Dict, List
 
@@ -43,21 +47,41 @@ def is_warm() -> bool:
     return _warmed
 
 
-def extract_from_image(image_bytes: bytes) -> Dict[str, float]:
-    from app.services.ocr import extract_rates_from_image
+class OCRBusy(Exception):
+    pass
 
-    with _slots:
+
+def validate_image(data: bytes) -> None:
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            if image.width * image.height > 8_000_000:
+                raise ValueError("Gambar maksimal 8 juta piksel. Perkecil atau crop gambar.")
+            image.verify()
+    except (OSError, Image.DecompressionBombError) as exc:
+        raise ValueError("File gambar tidak valid.") from exc
+
+
+@contextmanager
+def _slot():
+    if not _slots.acquire(timeout=1):
+        raise OCRBusy("OCR sedang digunakan. Coba lagi sebentar.")
+    try:
+        yield
+    finally:
+        _slots.release()
+
+
+def extract_from_image(image_bytes: bytes) -> Dict[str, float]:
+    with _slot():
         _ensure_engine()
+        from app.services.ocr import extract_rates_from_image
         return extract_rates_from_image(image_bytes)
 
 
-def extract_from_blocks(
-    left_bytes: bytes, middle_bytes: bytes, right_bytes: bytes
-) -> Dict[str, float]:
-    from app.services.ocr import extract_rates_from_blocks
-
-    with _slots:
+def extract_from_blocks(left_bytes: bytes, middle_bytes: bytes, right_bytes: bytes) -> Dict[str, float]:
+    with _slot():
         _ensure_engine()
+        from app.services.ocr import extract_rates_from_blocks
         return extract_rates_from_blocks(left_bytes, middle_bytes, right_bytes)
 
 

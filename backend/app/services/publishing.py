@@ -28,7 +28,7 @@ from app.models import (
     TargetState,
     VersionStatus,
 )
-from app.services import events
+from app.services import events, storage
 
 
 class PublishError(ValueError):
@@ -70,7 +70,7 @@ def ensure_publishable(version: Optional[RateVersion]) -> RateVersion:
             "Hanya versi berstatus ready yang bisa ditayangkan. "
             "Status versi ini: " + str(version.status) + "."
         )
-    if version.png_asset_id is None:
+    if version.png_asset_id is None or version.png_asset is None or not storage.asset_exists(version.png_asset):
         raise PublishError("Versi ini belum memiliki media board.")
     return version
 

@@ -1,6 +1,6 @@
 // ─── Generated Design Preview Component ───────────────────────────────────────
 //
-// Step 3 of the generator. The board shown here is the PNG the worker wrote
+// Step 3 of the generator. The board shown here is the PNG the save endpoint wrote
 // for this saved version - the same file a TV will display - so what is
 // previewed and what is published can never differ.
 
@@ -9,14 +9,13 @@ import { useState } from "react";
 import { Badge, ErrorBanner, SuccessBanner } from "../../common/ui.jsx";
 import { COLORS } from "../../common/theme.js";
 import { useAuthedMedia } from "../../../hooks/useAuthedMedia.js";
-import { downloadMedia, jobApi, versionApi } from "../../../services/apiClient.js";
+import { downloadMedia } from "../../../services/apiClient.js";
 import PublishDialog from "../../../features/displays/PublishDialog.jsx";
 
-export function GeneratedDesignPreview({ version, onReset, onVersionChange }) {
+export function GeneratedDesignPreview({ version, onReset }) {
   const { url: previewUrl, loading: previewLoading, error: previewError } =
     useAuthedMedia(version?.png_url);
 
-  const [videoBusy, setVideoBusy] = useState(false);
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
   const [showPublish, setShowPublish] = useState(false);
@@ -27,37 +26,6 @@ export function GeneratedDesignPreview({ version, onReset, onVersionChange }) {
       await downloadMedia(version.png_url, `pam_rate_board_v${version.version}.png`);
     } catch (err) {
       setError(err);
-    }
-  };
-
-  const handleVideo = async () => {
-    setError(null);
-    setNotice(null);
-
-    setVideoBusy(true);
-    try {
-      if (version.mp4_url) {
-        await downloadMedia(version.mp4_url, `pam_rate_board_v${version.version}.mp4`);
-        return;
-      }
-      const job = await versionApi.requestVideo(version.id);
-      const finished = await pollJob(job.id);
-
-      if (finished.status !== "succeeded") {
-        throw new Error("Pembuatan video gagal. Silakan coba lagi.");
-      }
-
-      const refreshed = await versionApi.get(version.id);
-      onVersionChange?.(refreshed);
-
-      if (refreshed.mp4_url) {
-        await downloadMedia(refreshed.mp4_url, `pam_rate_board_v${refreshed.version}.mp4`);
-      }
-      setNotice("Video MP4 siap diunduh.");
-    } catch (err) {
-      setError(err);
-    } finally {
-      setVideoBusy(false);
     }
   };
 
@@ -149,21 +117,6 @@ export function GeneratedDesignPreview({ version, onReset, onVersionChange }) {
           ⬇️ Download PNG
         </button>
         <button
-          onClick={handleVideo}
-          disabled={videoBusy}
-          style={{
-            background: videoBusy ? "#CFD8DC" : "linear-gradient(135deg, #1B5E20, #2E7D32)",
-            color: "#fff",
-            border: "none",
-            fontWeight: 900,
-            cursor: videoBusy ? "not-allowed" : "pointer",
-            boxShadow: videoBusy ? "none" : "0 6px 20px rgba(27,94,32,0.3)",
-            opacity: videoBusy ? 0.7 : 1,
-          }}
-        >
-          {videoBusy ? "⏳ Membuat Video..." : version?.mp4_url ? "🎬 Download MP4" : "🎬 Buat & Download MP4"}
-        </button>
-        <button
           onClick={() => setShowPublish(true)}
           style={{
             background: "#fff",
@@ -198,20 +151,4 @@ export function GeneratedDesignPreview({ version, onReset, onVersionChange }) {
       )}
     </div>
   );
-}
-
-async function pollJob(jobId, timeoutMs = 300000) {
-  const startedAt = Date.now();
-  // The MP4 encode is slow enough to need polling, but it is a background job
-  // so the page stays responsive while it runs.
-  for (;;) {
-    const job = await jobApi.get(jobId);
-    if (job.status === "succeeded" || job.status === "failed" || job.status === "cancelled") {
-      return job;
-    }
-    if (Date.now() - startedAt > timeoutMs) {
-      throw new Error("Pembuatan video terlalu lama. Cek status di Dashboard.");
-    }
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-  }
 }

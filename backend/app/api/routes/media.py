@@ -66,7 +66,7 @@ def get_media(
     if_none_match: Optional[str] = Header(None),
 ):
     asset = db.get(MediaAsset, asset_id)
-    if asset is None:
+    if asset is None or asset.kind == "board_mp4":
         raise HTTPException(status_code=404, detail="Media tidak ditemukan.")
 
     version = _version_for_asset(db, asset_id)
@@ -126,7 +126,7 @@ def download_media(
 ):
     """Browser download with a friendly filename, for admins and staff."""
     asset = db.get(MediaAsset, asset_id)
-    if asset is None:
+    if asset is None or asset.kind == "board_mp4":
         raise HTTPException(status_code=404, detail="Media tidak ditemukan.")
 
     version = _version_for_asset(db, asset_id)

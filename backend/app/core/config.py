@@ -11,7 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import List
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # backend/app/core/config.py -> backend/
@@ -40,9 +40,10 @@ class Settings(BaseSettings):
     # MariaDB 10.4 (XAMPP) speaks the MySQL protocol; PyMySQL is the driver.
     database_url: str = "mysql+pymysql://root:@127.0.0.1:3306/pam_rate_board?charset=utf8mb4"
     db_echo: bool = False
-    db_pool_size: int = 5
-    db_max_overflow: int = 10
+    db_pool_size: int = Field(2, ge=1, le=20)
+    db_max_overflow: int = Field(0, ge=0, le=20)
     db_pool_recycle: int = 1800
+    db_pool_timeout_seconds: int = Field(5, ge=1, le=30)
 
     # --- Security --------------------------------------------------------
     secret_key: str = ""
@@ -77,7 +78,11 @@ class Settings(BaseSettings):
     job_timeout_seconds: int = 600
     job_stale_after_seconds: int = 900
     worker_concurrency: int = 1
-    video_duration_seconds: int = 600
+    png_lock_timeout_seconds: int = Field(2, ge=0, le=10)
+    png_render_budget_seconds: int = Field(20, ge=1, le=60)
+    request_thread_limit: int = Field(4, ge=2, le=16)
+    ocr_cpu_threads: int = Field(1, ge=1, le=4)
+    realtime_enabled: bool = True
 
     # --- Events ----------------------------------------------------------
     event_poll_interval_seconds: float = 2.0

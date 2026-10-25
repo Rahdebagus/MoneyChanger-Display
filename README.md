@@ -14,7 +14,7 @@ baseline PNG byte for byte.
 
 | | |
 | --- | --- |
-| **Generator** | Upload image → OCR → edit rates → **Generate & Save** → download PNG/MP4 |
+| **Generator** | Upload image → OCR → edit rates → **Generate & Save** → download PNG |
 | **Versions** | Every generate saves an immutable version. Editing a live board creates a new version; it never overwrites what is on screen. |
 | **Displays** | A TV opens `/display`, shows a pairing code, an admin approves it, and the TV gets its own revocable credential. |
 | **Publishing** | Publish a *ready* version to one display, several, or a whole branch — now or on a schedule. Rollback and refresh are one click. |
@@ -27,7 +27,6 @@ baseline PNG byte for byte.
 - **Python 3.10** (3.10.11 verified)
 - **Node.js 20+** (22.22.2 verified)
 - **MySQL 8 or MariaDB 10.4+** — the local XAMPP service is MariaDB 10.4.32 and works
-- **ffmpeg** — bundled via `imageio-ffmpeg`, no separate install needed
 
 ---
 
@@ -101,14 +100,14 @@ python -m app.cli check
 
 ## Running
 
-Three processes. Each needs its own terminal, each with `.venv` activated.
+API and frontend are sufficient for saving PNG and immediate publication. Activate `.venv` for Python commands. The optional maintenance process handles disk cleanup after history deletion and scheduled publication.
 
 ```powershell
 # 1. API  (from backend\)
 cd backend
 uvicorn app.main:app --reload --port 8000
 
-# 2. Worker — generates boards and fires scheduled publishes  (from backend\)
+# Optional maintenance — cleans deleted media and fires scheduled publishes  (from backend\)
 cd backend
 python -m app.workers.runner
 
@@ -124,9 +123,8 @@ npm run dev
 | TV player | http://localhost:5173/display |
 | API docs | http://localhost:8000/docs |
 
-> The entry point is `app.main:app`, not the old flat `main:app`. The worker is
-> **not optional**: without it, versions stay in `generating` and never become
-> publishable.
+> The entry point is `app.main:app`. Save commits the rates, renders PNG with Pillow in the same request, then returns `ready`. No PNG queue or Cron worker is required.
+> For shared cPanel hosting, follow [the direct-PNG release guide](docs/direct-png-deployment.md), including the additive migration and local frontend build.
 
 ### Pointing the frontend at another host
 
@@ -198,7 +196,7 @@ backend/
     schemas/           request/response validation
     api/routes/        auth, versions, publications, displays, device, media, ws
     services/          generator, ocr, parser, mapper, publishing, pairing, jobs
-    workers/runner.py  job worker + publication scheduler
+    workers/runner.py  media cleanup + publication scheduler
   assets/              pam_bg.png, pam_logo.png  (used by the board generator)
   migrations/          Alembic
   tests/               regression + integration tests
